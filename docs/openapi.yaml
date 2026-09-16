@@ -1,0 +1,568 @@
+openapi: 3.0.3
+info:
+  title: Prompt Configuration API
+  description: API for managing prompt configurations and knowledge entries that drive AI prompts
+  version: 1.0.0
+  contact:
+    name: API Support
+
+servers:
+  - url: http://localhost:8080
+    description: Development server
+  - url: https://api.example.com
+    description: Production server
+
+paths:
+
+  /api/prompt-configurations/{identifier}:
+    get:
+      summary: Get configuration by ID or name
+      description: Retrieves a prompt configuration by UUID or by name. When both exist, UUID takes precedence.
+      operationId: getConfigurationByIdentifier
+      tags:
+        - Prompt Configurations
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          schema:
+            oneOf:
+              - type: string
+                format: uuid
+                description: Configuration ID (UUID)
+              - type: string
+                description: Configuration name
+          description: Configuration ID (UUID) or name. ID is checked first, then name.
+      responses:
+        '200':
+          description: Configuration found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptConfiguration'
+        '400':
+          description: Invalid identifier format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Configuration not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      summary: Update configuration
+      description: Updates a prompt configuration by ID or name. At least one field must be provided.
+      operationId: updateConfiguration
+      tags:
+        - Prompt Configurations
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          schema:
+            oneOf:
+              - type: string
+                format: uuid
+              - type: string
+          description: Configuration ID (UUID) or name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConfigurationRequest'
+      responses:
+        '200':
+          description: Configuration updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessMessage'
+        '400':
+          description: Invalid identifier or request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Configuration not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/prompt-configurations:
+    get:
+      summary: List prompt configurations
+      description: Retrieves prompt configurations, optionally filtered by status
+      operationId: listConfigurations
+      tags:
+        - Prompt Configurations
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - active
+              - inactive
+          description: Filter by configuration status (active/inactive). Omit to list all.
+      responses:
+        '200':
+          description: List of configurations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PromptConfiguration'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: Create new prompt configuration
+      description: Creates a new prompt configuration. Configurations default to inactive.
+      operationId: createConfiguration
+      tags:
+        - Prompt Configurations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConfigurationRequest'
+      responses:
+        '201':
+          description: Configuration created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptConfiguration'
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/prompt-configurations/{id}/knowledge-entries:
+    get:
+      summary: Get knowledge entries for configuration
+      description: Retrieves all knowledge entries for a specific prompt configuration
+      operationId: getKnowledgeEntries
+      tags:
+        - Knowledge Entries
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Configuration ID
+      responses:
+        '200':
+          description: List of knowledge entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/KnowledgeEntry'
+        '400':
+          description: Invalid configuration ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: Add knowledge entry to configuration
+      description: Adds a new knowledge entry to a prompt configuration. Creates version 1 record automatically.
+      operationId: addKnowledgeEntry
+      tags:
+        - Knowledge Entries
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Configuration ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddKnowledgeEntryRequest'
+      responses:
+        '201':
+          description: Knowledge entry created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeEntry'
+        '400':
+          description: Invalid configuration ID or request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/knowledge-entries/{id}/versions:
+    get:
+      summary: Get version history for knowledge entry
+      description: Retrieves all versions of a knowledge entry, ordered by version descending
+      operationId: getKnowledgeVersions
+      tags:
+        - Knowledge Entries
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Knowledge entry ID
+      responses:
+        '200':
+          description: List of knowledge entry versions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/KnowledgeVersion'
+        '400':
+          description: Invalid entry ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/knowledge-entries/{id}:
+    put:
+      summary: Update knowledge entry
+      description: Updates a knowledge entry. Automatically creates a new version record.
+      operationId: updateKnowledgeEntry
+      tags:
+        - Knowledge Entries
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Knowledge entry ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateKnowledgeEntryRequest'
+      responses:
+        '200':
+          description: Knowledge entry updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessMessage'
+        '400':
+          description: Invalid entry ID or request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/prompt-configurations/{id}/activate:
+    post:
+      summary: Activate prompt configuration
+      description: Activates a prompt configuration and deactivates all others. Atomic operation.
+      operationId: activateConfiguration
+      tags:
+        - Prompt Configurations
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Configuration ID to activate
+      responses:
+        '200':
+          description: Configuration activated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessMessage'
+        '400':
+          description: Invalid configuration ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    PromptConfiguration:
+      type: object
+      description: Prompt configuration with optional system prompt and metadata
+      required:
+        - id
+        - name
+        - version
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier
+        name:
+          type: string
+          description: Configuration name (must be unique)
+        system_prompt:
+          type: string
+          nullable: true
+          description: System prompt text for the AI
+        metadata:
+          type: object
+          description: Arbitrary metadata (JSONB)
+          example:
+            experiment: "variant_b"
+            version_label: "v1.2"
+        version:
+          type: integer
+          description: Configuration version number
+          example: 1
+        is_active:
+          type: boolean
+          description: Whether this is the currently active configuration
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        updated_at:
+          type: string
+          format: date-time
+          description: Last update timestamp
+
+    CreateConfigurationRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Configuration name (must be unique)
+          example: "customer_service_v1"
+        system_prompt:
+          type: string
+          nullable: true
+          description: System prompt text for the AI
+          example: "You are a helpful customer service assistant"
+        metadata:
+          type: object
+          nullable: true
+          description: Arbitrary metadata
+          example:
+            experiment: "variant_b"
+            environment: "production"
+
+    UpdateConfigurationRequest:
+      type: object
+      description: At least one field must be provided for update
+      properties:
+        system_prompt:
+          type: string
+          nullable: true
+          description: System prompt text for the AI
+          example: "You are a helpful customer service assistant"
+        metadata:
+          type: object
+          nullable: true
+          description: Arbitrary metadata
+          example:
+            experiment: "variant_c"
+            environment: "staging"
+
+    KnowledgeEntry:
+      type: object
+      description: Knowledge entry for a prompt configuration
+      required:
+        - id
+        - config_id
+        - content
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier
+        config_id:
+          type: string
+          format: uuid
+          description: Configuration this entry belongs to
+        category:
+          type: string
+          nullable: true
+          description: Category for organizing entries (e.g., "rules", "context", "examples")
+          example: "rules"
+        content:
+          type: string
+          description: Knowledge content (text)
+        metadata:
+          type: object
+          description: Arbitrary metadata (JSONB)
+          example:
+            source: "knowledge_base"
+            confidence: 0.95
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        updated_at:
+          type: string
+          format: date-time
+          description: Last update timestamp
+
+    AddKnowledgeEntryRequest:
+      type: object
+      required:
+        - content
+      properties:
+        category:
+          type: string
+          nullable: true
+          description: Category for organizing entries
+          example: "rules"
+        content:
+          type: string
+          description: Knowledge content (text)
+          example: "Always prioritize customer safety in recommendations"
+        metadata:
+          type: object
+          nullable: true
+          description: Arbitrary metadata
+          example:
+            source: "training_data"
+            reviewed: true
+
+    KnowledgeVersion:
+      type: object
+      description: Version record for a knowledge entry
+      required:
+        - id
+        - entry_id
+        - content_version
+        - content
+        - changed_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier
+        entry_id:
+          type: string
+          format: uuid
+          description: Knowledge entry this version belongs to
+        content_version:
+          type: integer
+          description: Version number (auto-incrementing)
+          example: 1
+        content:
+          type: string
+          description: Content at this version
+        changed_at:
+          type: string
+          format: date-time
+          description: When this version was created
+
+    UpdateKnowledgeEntryRequest:
+      type: object
+      required:
+        - content
+      properties:
+        content:
+          type: string
+          description: New content for the knowledge entry
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+
+    SuccessMessage:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Success message
+          example: "knowledge entry updated"

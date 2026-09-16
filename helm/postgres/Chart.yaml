@@ -1,0 +1,10 @@
+apiVersion: v2
+name: postgres
+description: PostgreSQL database Helm chart for Zennify AI Assistant
+type: application
+version: 0.1.0
+appVersion: "15"
+keywords:
+  - postgres
+  - database
+home: https://www.postgresql.org

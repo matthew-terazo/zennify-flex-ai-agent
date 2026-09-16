@@ -1,0 +1,15 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001_create_prompt_configuration_schema
+      author: zennify
+      description: "Create prompt configuration schema with versioning"
+      sqlFile:
+        path: migrations/001_create_prompt_configuration_schema.sql
+        relativeToChangelogFile: true
+      rollback:
+        - dropTable:
+            tableName: knowledge_versions
+        - dropTable:
+            tableName: knowledge_entries
+        - dropTable:
+            tableName: prompt_configurations

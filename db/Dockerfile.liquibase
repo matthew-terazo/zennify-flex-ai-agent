@@ -1,0 +1,6 @@
+FROM liquibase/liquibase:latest
+
+COPY liquibase.yaml /liquibase/changelog/
+COPY migrations/ /liquibase/changelog/migrations/
+
+ENTRYPOINT ["liquibase", "update"]
