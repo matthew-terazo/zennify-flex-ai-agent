@@ -1,0 +1,70 @@
+# Direct answer
+#
+# A caller dials in and the assistant handles the call on its own, start to finish.
+# This is the baseline flow; the other two diagrams build on the conference it sets up.
+#
+# Code: controllers/taskrouter-queue-assignment-callback-post.go
+#       controllers/event-openai-post.go
+
+title: |md
+  # Direct answer a call
+  The assistant answers an inbound call and owns it end to end.
+| {near: top-center}
+
+shape: sequence_diagram
+
+caller: Caller
+voice: Twilio Voice and Conference
+taskrouter: Twilio TaskRouter
+app: zenn-ai-assistant
+openai: OpenAI Realtime API
+
+caller -> voice: Dials the contact centre number
+voice -> taskrouter: Creates a voice task (isVirtualAgentTask true)
+taskrouter -> taskrouter: Reserves the virtual agent worker
+
+reservation: Reservation is answered with a conference {
+  taskrouter -> app: POST /twilio/taskrouter/queue-assignment-callback
+  app -> taskrouter: instruction conference, end_conference_on_exit false
+
+  # end_conference_on_exit false is load bearing. It is what later lets the assistant
+  # hang up its own leg mid-call without tearing down the caller's conference.
+}
+
+other_webhook: The event stream sees the same reservation {
+  taskrouter -> app: POST /twilio/taskrouter/event (reservation.created)
+  app -> app: Skipped - isVirtualAgentTask, the assignment callback owns it
+
+  # Without this guard the assistant would be dialled onto the call twice.
+}
+
+bring_up: Conference comes up {
+  taskrouter -> voice: Places the caller in a conference named after the task sid
+  voice -> openai: SIP INVITE to the worker contact_uri, header X-Twilio-CallSid
+  voice -> app: POST /twilio/conference/event (participant-join)
+  app -> app: No warm transfer is watching this conference, so nothing to do
+}
+
+session: Assistant session starts {
+  openai -> app: POST /openai/events/realtime-call-incoming
+  app -> openai: 204, then continues out of band
+  app -> openai: POST /v1/realtime/calls/ID/accept with prompt, end_call and transfer_call
+  app -> openai: Opens websocket wss /v1/realtime?call_id=ID
+  app -> app: No X-Zenn-Virtual-Agent-Mode header, so mode is cold
+  app -> openai: response.create to greet
+}
+
+openai -> caller: Greeting audio over the conference
+caller -> openai: Conversation
+
+hangup: Caller is done and the assistant calls end_call {
+  openai -> app: response.function_call_arguments.done (end_call)
+  app -> taskrouter: Finds the task by the assistant's call sid
+  app -> taskrouter: Completes the task
+  app -> voice: Sets the conference status to completed
+  app -> openai: POST /v1/realtime/calls/ID/hangup
+  voice -> caller: Call ends
+
+  # The conference has to be ended explicitly. The assistant's leg no longer ends it on
+  # exit, so hanging up alone would leave the caller alone in an empty conference.
+}

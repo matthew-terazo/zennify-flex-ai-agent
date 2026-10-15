@@ -1,0 +1,92 @@
+# Warm transfer out
+#
+# The assistant hands the caller to a human agent in the Everyone queue, staying on the
+# line to introduce them before it leaves. Picks up where direct-answer-call.d2 ends,
+# with the caller and the assistant already on a conference.
+#
+# Code: controllers/event-openai-post.go (startWarmTransfer, awaitAgentJoin)
+#       controllers/taskrouter-queue-assignment-callback-post.go (joinWorkerToConference)
+#       controllers/event-conference-post.go
+#       services/warm-transfer/broker.go
+
+title: |md
+  # Warm transfer a call
+  The assistant stays with the caller until an agent joins, introduces them, then leaves.
+| {near: top-center}
+
+shape: sequence_diagram
+
+caller: Caller
+voice: Twilio Voice and Conference
+taskrouter: Twilio TaskRouter
+app: zenn-ai-assistant
+openai: OpenAI Realtime API
+agent: Human agent
+
+# Precondition: caller and assistant are already on a conference named after the task sid.
+
+caller -> openai: Asks to speak to a person
+openai -> app: response.function_call_arguments.done (transfer_call with target_queue and summary)
+
+queue_task: A task is queued for the Everyone queue {
+  app -> taskrouter: Finds the task by the assistant's call sid
+  app -> taskrouter: Resolves the Everyone queue by friendly name
+  app -> app: Watches the conference BEFORE the task exists
+
+  # An agent can answer faster than CreateTask returns. Registering the watch first is
+  # what stops the join signal being missed.
+
+  app -> taskrouter: Creates a task carrying conference_name, conference_sid and the summary
+}
+
+reassure: The caller is told what is happening {
+  app -> openai: conversation.item.create (function_call_output) then response.create
+  openai -> caller: Tells the caller an agent is coming and that it will stay on the line
+}
+
+pickup: An agent picks the task up {
+  taskrouter -> taskrouter: Reserves a worker in the Everyone queue
+  taskrouter -> app: POST /twilio/taskrouter/queue-assignment-callback
+  app -> app: Task attributes say is_warm_transfer, so this is a transfer reservation
+  app -> taskrouter: instruction accept
+
+  # Not a conference instruction. That would name a NEW conference after the new task
+  # sid, when the caller is already sitting in the original one.
+
+  app -> voice: Adds the worker to the EXISTING conference, end_conference_on_exit true
+  voice -> agent: Rings the agent
+  agent -> voice: Answers and joins the conference
+}
+
+signal: The assistant learns the agent has arrived {
+  voice -> app: POST /twilio/conference/event (participant-join)
+  app -> app: Signals the broker watching this conference
+}
+
+handoff: The warm moment - all three are on the call {
+  app -> app: Marks the transfer handed off, so end_call now means leave
+  app -> openai: response.create to introduce the caller with the summary
+  openai -> agent: Speaks the handoff summary
+  agent -> openai: Asks any follow-up questions
+  openai -> agent: Answers them
+
+  # The assistant stays on the call after the introduction. Finishing the introduction is
+  # not the same as being finished, and the agent usually has questions.
+}
+
+leave: The assistant decides it is done {
+  openai -> app: response.function_call_arguments.done (end_call)
+  app -> taskrouter: Completes the assistant's task
+  app -> openai: POST /v1/realtime/calls/ID/hangup
+  openai -> voice: Assistant leg leaves, end_conference_on_exit is false
+  caller -> agent: Caller and agent stay connected
+
+  # end_call does NOT end the conference here. The caller and the agent are still talking
+  # on it, so the assistant only drops its own leg.
+}
+
+waiting: If no agent joins within two minutes {
+  app -> openai: response.create to check back in with the caller
+  openai -> caller: Says it is still holding and asks if they want to keep waiting
+  app -> app: Keeps waiting - the task stays queued
+}

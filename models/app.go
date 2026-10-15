@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"zennify/zenn-ai-assistant/config"
 	comms_twilio "zennify/zenn-ai-assistant/services/twilio"
+	warmtransfer "zennify/zenn-ai-assistant/services/warm-transfer"
 )
 
 type App struct {
@@ -14,4 +15,5 @@ type App struct {
 	Twilio              comms_twilio.TwilioClient
 	DB                  *sql.DB
 	PromptConfigService PromptConfigurationService
+	WarmTransfers       *warmtransfer.Broker
 }

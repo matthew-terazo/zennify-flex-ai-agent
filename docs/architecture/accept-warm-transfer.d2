@@ -1,0 +1,84 @@
+# Accept a transferred call
+#
+# A Flex agent hands a live call to the virtual agent, either by cold transferring it or
+# by conferencing the assistant in. Nothing on the Flex side will ever accept a
+# reservation offered to the virtual agent worker, so this system accepts it and dials
+# the assistant onto the call the customer is already on.
+#
+# Code: controllers/event-taskrouter-post.go (handleVoiceReservationCreated)
+#       models/virtual-agent-transfer.go
+#       controllers/event-openai-post.go
+
+title: |md
+  # Accept a warm transferred call
+  A Flex agent transfers a live call to the assistant, cold or by conferencing it in.
+| {near: top-center}
+
+shape: sequence_diagram
+
+customer: Customer
+agent: Flex agent
+voice: Twilio Voice and Conference
+taskrouter: Twilio TaskRouter
+app: zenn-ai-assistant
+openai: OpenAI Realtime API
+
+# Precondition: customer and Flex agent are already talking on a conference.
+
+agent -> taskrouter: Transfers to the virtual agent worker, cold or conference
+taskrouter -> taskrouter: Creates a task carrying transferMeta and reserves the virtual agent worker
+taskrouter -> app: POST /twilio/taskrouter/event (reservation.created)
+
+decide: Is this ours to answer {
+  app -> app: Worker attributes say isVirtualAgent and the channel is voice
+  app -> app: transferMeta present, or no isVirtualAgentTask, so it is a hand-off
+
+  # The assistant's own inbound reservation is answered by the queue assignment callback.
+  # Answering that one here as well would put the assistant on the call twice.
+
+  app -> app: transferMeta mode COLD becomes cold, WARM becomes conference
+  app -> app: Conference sid from task attributes, else looked up by originalTaskSid
+}
+
+connect: The assistant is dialled onto the call {
+  app -> taskrouter: Accepts the reservation
+  app -> voice: Adds the assistant SIP address to the conference
+  app -> voice: SIP uri carries X-Zenn-Virtual-Agent-Mode and X-Zenn-Task-Sid
+  app -> voice: end_conference_on_exit is true only for a cold transfer
+  app -> taskrouter: Records worker_call_sid and virtual_agent_mode on the task
+}
+
+session: Assistant session starts {
+  voice -> openai: SIP INVITE carrying the X-Zenn headers
+  openai -> app: POST /openai/events/realtime-call-incoming
+  app -> openai: Accepts the call and opens the websocket
+  app -> app: Reads the mode straight off the SIP header
+
+  # The mode rides in on the invite rather than being read back from task attributes.
+  # A task lookup would race the attribute write against the assistant's first words.
+}
+
+cold: Cold transfer - the Flex agent has left {
+  app -> openai: response.create to greet
+  openai -> customer: Greets the customer and takes over the call
+  openai -> app: Later, end_call
+  app -> taskrouter: Completes the task
+  app -> voice: Ends the conference
+  app -> openai: Hangs up the assistant leg
+}
+
+conference: Conference in - the Flex agent is still on the call {
+  app -> openai: conversation.item.create, system message to stay silent until addressed
+
+  # No greeting. The customer is mid-conversation with a human, and the assistant would
+  # otherwise talk over them.
+
+  agent -> openai: Asks the assistant a question
+  openai -> agent: Answers briefly
+  openai -> app: Later, end_call
+  app -> taskrouter: Completes the task
+  app -> openai: Hangs up ONLY its own leg
+  agent -> customer: Agent and customer keep the call
+
+  # Ending the conference here would hang up on the agent and their customer.
+}

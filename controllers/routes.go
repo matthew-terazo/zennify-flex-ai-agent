@@ -32,6 +32,12 @@ func RegisterRoutes(app models.App) {
 			twilioAuth,
 			middleware.Logging))
 
+	// Conference status callbacks; drives the hand-off step of a warm transfer
+	app.Mux.Handle("POST /twilio/conference/event",
+		middleware.Chain(ConferenceEventController{App: app},
+			twilioAuth,
+			middleware.Logging))
+
 	app.Mux.Handle("POST /openai/events/realtime-call-incoming",
 		middleware.Chain(OpenAIEventController{App: app},
 			middleware.Logging))

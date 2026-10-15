@@ -1,9 +1,6 @@
 package models
 
-import (
-	"encoding/json"
-	"strconv"
-)
+import "encoding/json"
 
 // TwilioTaskRouterEvent represents a Twilio Task Router event in CloudEvents format
 type TwilioTaskRouterEvent struct {
@@ -133,59 +130,55 @@ type WorkerAttributes struct {
 func (m TwilioTaskRouterPayload) IsAssignedToVirtualAgent() (bool, error) {
 	var attributes WorkerAttributes
 
-	s, err := strconv.Unquote(string(m.WorkerAttributes))
-	if err != nil {
-		return false, err
-	}
+	err := DecodeTwilioAttributes(m.WorkerAttributes, &attributes)
 
-	if err := json.Unmarshal([]byte(s), &attributes); err != nil {
-		return attributes.IsVirtualAgent, err
-	}
-
-	return attributes.IsVirtualAgent, nil
+	return attributes.IsVirtualAgent, err
 }
 
 func (m TwilioTaskRouterPayload) IsVirtualAgentTask() (bool, error) {
 	var attributes TaskAttributes
 
-	s, err := strconv.Unquote(string(m.TaskAttributes))
-	if err != nil {
-		return false, err
-	}
+	err := DecodeTwilioAttributes(m.TaskAttributes, &attributes)
 
-	if err := json.Unmarshal([]byte(s), &attributes); err != nil {
-		return attributes.IsVirtualAgentTask, err
-	}
-
-	return attributes.IsVirtualAgentTask, nil
+	return attributes.IsVirtualAgentTask, err
 }
 
 func (m TwilioTaskRouterPayload) GetCallSid() (string, error) {
 	var attributes TaskAttributes
 
-	s, err := strconv.Unquote(string(m.TaskAttributes))
-	if err != nil {
-		return attributes.CallSid, err
-	}
+	err := DecodeTwilioAttributes(m.TaskAttributes, &attributes)
 
-	if err := json.Unmarshal([]byte(s), &attributes); err != nil {
-		return attributes.CallSid, err
-	}
-
-	return attributes.CallSid, nil
+	return attributes.CallSid, err
 }
 
 func (m TwilioTaskRouterPayload) GetConversationSid() (string, error) {
 	var attributes TaskAttributes
 
-	s, err := strconv.Unquote(string(m.TaskAttributes))
-	if err != nil {
-		return attributes.ConversationSid, err
+	err := DecodeTwilioAttributes(m.TaskAttributes, &attributes)
+
+	return attributes.ConversationSid, err
+}
+
+// TransferAttributes reads the fields needed to decide whether this reservation is a
+// hand-off to the assistant and how it should behave once connected.
+func (m TwilioTaskRouterPayload) TransferAttributes() (TransferredTaskAttributes, error) {
+	var attributes TransferredTaskAttributes
+
+	if err := DecodeTwilioAttributes(m.TaskAttributes, &attributes); err != nil {
+		return attributes, err
 	}
 
-	if err := json.Unmarshal([]byte(s), &attributes); err != nil {
-		return attributes.ConversationSid, err
+	return attributes, nil
+}
+
+// WorkerContactUri is the address Task Router would dial to reach the reserved worker. For
+// the virtual agent that is its SIP address, which is how the assistant gets onto a call.
+func (m TwilioTaskRouterPayload) WorkerContactUri() (string, error) {
+	var attributes WorkerContactAttributes
+
+	if err := DecodeTwilioAttributes(m.WorkerAttributes, &attributes); err != nil {
+		return "", err
 	}
 
-	return attributes.ConversationSid, nil
+	return attributes.ContactUri, nil
 }

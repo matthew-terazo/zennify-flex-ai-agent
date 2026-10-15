@@ -44,11 +44,11 @@ With Docker:
 ```bash
 docker run --rm \
   -v $(pwd)/db:/liquibase/changelog \
-  -e DB_HOST=postgres \
+  -e DB_HOST=app-postgres-1 \
   -e DB_PORT=5432 \
-  -e DB_NAME=zennify \
-  -e DB_USER=postgres \
-  -e DB_PASSWORD=changeme \
+  -e DB_NAME=zenn_ai \
+  -e DB_USER=app \
+  -e DB_PASSWORD=app \
   liquibase/liquibase:latest update
 ```
 

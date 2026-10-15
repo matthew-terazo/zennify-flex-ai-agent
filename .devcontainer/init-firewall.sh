@@ -67,11 +67,14 @@ done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q)
 for domain in \
     "registry.npmjs.org" \
     "api.anthropic.com" \
+    "api.openai.com" \
+    "api.twilio.com" \
+    "taskrouter.twilio.com" \
     "sentry.io" \
     "statsig.com" \
     "proxy.golang.org" \
-    "storage.googleapis.com" \
     "sum.golang.org" \
+    "storage.googleapis.com" \
     "marketplace.visualstudio.com" \
     "vscode.blob.core.windows.net" \
     "update.code.visualstudio.com"; do

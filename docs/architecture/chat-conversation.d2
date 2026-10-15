@@ -1,0 +1,74 @@
+# Chat conversation
+#
+# The non-voice path. A customer messages in over Twilio Conversations (SMS, web chat,
+# WhatsApp) and the assistant answers in text. Nothing here touches conferences or SIP;
+# the assistant is driven by a per-conversation webhook rather than a live socket, and
+# answers through Anthropic rather than the OpenAI realtime API.
+#
+# Code: controllers/event-taskrouter-post.go (handleChatReservationCreated)
+#       controllers/event-conversation-post.go
+#       services/artificial-intelligence/anthropic.go
+
+title: |md
+  # Chat conversation
+  A customer messages in and the assistant answers in text over Twilio Conversations.
+| {near: top-center}
+
+shape: sequence_diagram
+
+customer: Customer
+conversations: Twilio Conversations
+taskrouter: Twilio TaskRouter
+app: zenn-ai-assistant
+claude: Anthropic API
+
+customer -> conversations: Opens a conversation (SMS, web chat, WhatsApp)
+conversations -> taskrouter: A chat task is created carrying the conversationSid
+taskrouter -> taskrouter: Reserves the virtual agent worker
+taskrouter -> app: POST /twilio/taskrouter/event (reservation.created)
+
+wiring: The conversation is wired to the assistant {
+  app -> app: Worker attributes say isVirtualAgent and the channel is chat
+  app -> taskrouter: Accepts the reservation
+  app -> app: Reads the conversationSid off the task attributes
+  app -> conversations: Records the taskSid on the conversation attributes
+
+  # The task sid is stashed on the conversation because the message webhook that arrives
+  # later carries only the conversation sid, and end_task needs the task.
+
+  app -> conversations: Creates a scoped webhook to /twilio/conversation/event
+  app -> conversations: Filtered to onMessageAdded, replay after 0
+}
+
+turn: Each customer message {
+  customer -> conversations: Sends a message
+  conversations -> app: POST /twilio/conversation/event (onMessageAdded, form encoded)
+  app -> conversations: Fetches the conversation to read back the taskSid
+  app -> app: Loads the active prompt configuration from Postgres
+  app -> app: Builds a fresh agent for this message only
+
+  # The agent is constructed per message and fed just this one message, so the assistant
+  # carries no history between turns of the same conversation.
+
+  app -> claude: SendMessage with the system prompt and the end_task, close_conversation tools
+  claude -> app: Reply text and any tool calls
+  app -> conversations: Sends the reply authored as bot
+  conversations -> customer: Delivers the reply
+}
+
+echo: The reply is itself a new message {
+  conversations -> app: POST /twilio/conversation/event (onMessageAdded, author bot)
+  app -> app: Handled like any other message
+
+  # Nothing distinguishes the assistant's own message from the customer's here. There is
+  # no author check on the way in, and the outbound message does not set
+  # X-Twilio-Webhook-Enabled to false, so the reply is delivered back to this webhook.
+  # Confirm against a live conversation before relying on this diagram either way.
+}
+
+wrapup: Wrapping up {
+  claude -> app: end_task tool call
+  app -> taskrouter: Completes the task using the stashed taskSid
+  claude -> app: close_conversation tool call
+  app -> conversations: Closes the conversation
+}

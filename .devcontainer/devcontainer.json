@@ -1,5 +1,5 @@
 {
-  "name": "Claude Code Sandbox",
+  "name": "Zenn AI Assistant",
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
@@ -9,19 +9,23 @@
       "ZSH_IN_DOCKER_VERSION": "1.2.0"
     }
   },
-  "runArgs": ["--cap-add=NET_ADMIN", "--cap-add=NET_RAW"],
+  "runArgs": [
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_RAW",
+    "--network=zenn-agent-ai",
+    "--name=zenn-ai-api"
+  ],
   "customizations": {
     "vscode": {
       "extensions": [
         "anthropic.claude-code",
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
-        "eamodio.gitlens",
         "golang.go"
       ],
       "settings": {
         "editor.formatOnSave": true,
-        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.defaultFormatter": "golang.go",
         "editor.codeActionsOnSave": {
           "source.fixAll.eslint": "explicit"
         },

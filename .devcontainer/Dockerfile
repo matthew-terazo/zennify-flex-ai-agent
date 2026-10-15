@@ -40,12 +40,6 @@ RUN tar -C /usr/local -xzf go1.26.5.linux-arm64.tar.gz
 ENV PATH=$PATH:/usr/local/go/bin
 ENV PATH="$PATH:$(go env GOPATH)/bin"
 
-RUN go install -v github.com/josharian/impl@v1.4.0
-RUN go install -v github.com/haya14busa/goplay/cmd/goplay@v1.0.0
-RUN go install -v github.com/go-delve/delve/cmd/dlv@latest
-RUN go install -v golang.org/x/tools/cmd/goimports@latest
-RUN go install -v golang.org/x/tools/gopls@latest
-
 # Persist bash history.
 RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
   && mkdir /commandhistory \
@@ -102,3 +96,9 @@ RUN chmod +x /usr/local/bin/init-firewall.sh && \
   echo "node ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/node-firewall && \
   chmod 0440 /etc/sudoers.d/node-firewall
 USER node
+
+RUN go install -v github.com/josharian/impl@v1.4.0
+RUN go install -v github.com/haya14busa/goplay/cmd/goplay@v1.0.0
+RUN go install -v github.com/go-delve/delve/cmd/dlv@v1.27.2
+RUN go install -v golang.org/x/tools/cmd/goimports@v0.50.0
+RUN go install -v golang.org/x/tools/gopls@v0.23.0

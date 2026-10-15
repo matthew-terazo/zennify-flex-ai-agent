@@ -7,10 +7,10 @@ DB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default values
 HOST="${DB_HOST:-localhost}"
-PORT="${DB_PORT:-65025}"
+PORT="${DB_PORT:-5432}"
 DATABASE="${DB_NAME:-zenn_ai}"
-USER="${DB_USER:-postgres}"
-PASSWORD="${DB_PASSWORD:-changeme}"
+USER="${DB_USER:-app}"
+PASSWORD="${DB_PASSWORD:-app}"
 LIQUIBASE_CMD="${1:-update}"
 
 # Available commands
