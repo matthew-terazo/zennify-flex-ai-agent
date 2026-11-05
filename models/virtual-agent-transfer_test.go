@@ -27,7 +27,9 @@ func TestInboundTaskIsNotATransfer(t *testing.T) {
 	}
 }
 
-func TestFlexColdTransferConnectsAndOwnsTheCall(t *testing.T) {
+// Fallback path: a task that carries a transferMeta block. Real Flex payloads state the
+// transfer on the event instead - see flex-warm-transfer_test.go.
+func TestTransferMetaColdConnectsAndOwnsTheCall(t *testing.T) {
 	var payload TwilioTaskRouterPayload
 	payload.TaskAttributes = eventStreamAttributes(`{"transferMeta":{"mode":"COLD","originalTaskSid":"WTorig"}}`)
 
@@ -49,7 +51,7 @@ func TestFlexColdTransferConnectsAndOwnsTheCall(t *testing.T) {
 	}
 }
 
-func TestFlexWarmTransferIsAConferenceIn(t *testing.T) {
+func TestTransferMetaWarmIsAConferenceIn(t *testing.T) {
 	var payload TwilioTaskRouterPayload
 	payload.TaskAttributes = eventStreamAttributes(`{"transferMeta":{"mode":"WARM","originalTaskSid":"WTorig"}}`)
 

@@ -310,7 +310,15 @@ func (c OpenAIEventController) handleRealtimeCallIncomingWebhookEvent(event webh
 					return
 				}
 
-				if _, err := c.App.Twilio.EndTask(*task.Sid); err != nil {
+				// On a conference-in the task is not the assistant's to finish. Flex
+				// reserves the assistant against the agent's existing task rather than
+				// creating a new one, so completing it would complete the agent's task out
+				// from under them while they are still on the call.
+				guestOnAgentsTask := mode == models.VirtualAgentModeConference
+
+				if guestOnAgentsTask {
+					logger.Info().Msg("leaving the task open; it belongs to the agent running this call")
+				} else if _, err := c.App.Twilio.EndTask(*task.Sid); err != nil {
 					logger.Error().Err(err).Msg("error ending task")
 				}
 
@@ -321,7 +329,7 @@ func (c OpenAIEventController) handleRealtimeCallIncomingWebhookEvent(event webh
 				// has to be ended explicitly or the caller is left alone in an empty one.
 				handedOver := transfer != nil && transfer.hasHandedOff()
 
-				if mode == models.VirtualAgentModeConference || handedOver {
+				if guestOnAgentsTask || handedOver {
 					logger.Info().Bool("afterWarmTransfer", handedOver).Msg("leaving the conference; the others keep the call")
 				} else if conferenceSid := c.conferenceSidForTask(task, logger); conferenceSid != "" {
 					if _, err := c.App.Twilio.EndConference(conferenceSid); err != nil {

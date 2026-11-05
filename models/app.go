@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 	"zennify/zenn-ai-assistant/config"
+	"zennify/zenn-ai-assistant/services/reservation"
 	comms_twilio "zennify/zenn-ai-assistant/services/twilio"
 	warmtransfer "zennify/zenn-ai-assistant/services/warm-transfer"
 )
@@ -16,4 +17,5 @@ type App struct {
 	DB                  *sql.DB
 	PromptConfigService PromptConfigurationService
 	WarmTransfers       *warmtransfer.Broker
+	Reservations        *reservation.Guard
 }

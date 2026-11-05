@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 
 	"zennify/zenn-ai-assistant/middleware"
 	"zennify/zenn-ai-assistant/models"
@@ -49,8 +50,10 @@ func (c TaskRouterEventController) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		switch event.Type {
 		case "com.twilio.taskrouter.reservation.created":
 			if err := c.handleReservationCreated(event, logger); err != nil {
-				writeJSONResponse(w, http.StatusBadRequest, nil)
-				return
+				// Deliberately still a 2xx. This handler dials real call legs, so a
+				// redelivery of work that partly succeeded is worse than letting the
+				// reservation time out visibly.
+				logger.Err(err).Msg("error handling reservation")
 			}
 		default:
 			logger.Debug().Str("event_type", event.Type).Msg("Unhandled Task Router event type")
@@ -97,19 +100,45 @@ func (c TaskRouterEventController) handleVoiceReservationCreated(event models.Tw
 	mode := attributes.ConnectionMode()
 	logger = logger.With().Str("mode", mode).Str("taskSid", payload.TaskSID).Logger()
 
-	conferenceSid, err := c.conferenceForReservation(attributes, payload, logger)
-	if err != nil {
-		logger.Err(err).Msg("error finding the call to connect the virtual agent to")
-		return err
+	// Connecting the assistant dials a leg onto a live call, so it must happen once even
+	// though Task Router may present this reservation to us more than once.
+	if !c.App.Reservations.Claim(payload.ReservationSID) {
+		logger.Info().Msg("reservation already being connected; standing down")
+		return nil
 	}
 
-	// Accept first so Task Router stops offering this reservation elsewhere.
-	res, err := c.App.Twilio.AcceptReservaton(payload.ReservationSID, payload.TaskSID, taskrouter.UpdateTaskReservationParams{})
-	if err != nil {
-		logger.Err(err).Msg("error accepting reservation")
-		return err
+	connected := false
+	defer func() {
+		// Nothing was dialled, so let a later delivery try again.
+		if !connected {
+			c.App.Reservations.Release(payload.ReservationSID)
+		}
+	}()
+
+	// conferenceSid, err := c.conferenceForReservation(attributes, payload, logger)
+	// if err != nil {
+	// 	logger.Err(err).Msg("error finding the call to connect the virtual agent to")
+	// 	return err
+	// }
+
+	// A WARM transfer's reservation is left alone here. The assistant has not answered
+	// yet, and resolving a reservation for a leg that might never come up is worse than
+	// waiting. The participant status callback set below completes it once the leg really
+	// answers, and leaves it alone if it never does.
+	//
+	// A cold transfer is the opposite: the call is being handed over for good, so the
+	// reservation is accepted now to stop Task Router offering it anywhere else.
+	if mode == models.VirtualAgentModeConference {
+		logger.Info().Msg("warm transfer; dialling the assistant in and completing the reservation once it answers")
+	} else {
+		res, err := c.App.Twilio.AcceptReservationIfPending(payload.ReservationSID, payload.TaskSID)
+		if err != nil {
+			logger.Err(err).Msg("error accepting reservation")
+			return err
+		}
+
+		logger.Info().Any("reservation", res).Msg("reservation accepted")
 	}
-	logger.Info().Any("reservation", res).Msg("reservation accepted")
 
 	var participantParams api.CreateParticipantParams
 
@@ -125,29 +154,57 @@ func (c TaskRouterEventController) handleVoiceReservationCreated(event models.Tw
 	participantParams.SetEndConferenceOnExit(mode == models.VirtualAgentModeCold)
 	participantParams.SetBeep("false")
 
-	participant, err := c.App.Twilio.AddConferenceParticipant(conferenceSid, participantParams)
-	if err != nil {
-		logger.Err(err).Str("conferenceSid", conferenceSid).Msg("error dialing the virtual agent into the conference")
-		return err
+	// Ask to be told when this leg answers, so the warm transfer's reservation can be
+	// completed then rather than resolved now. The reservation rides on the url because
+	// this callback can land on any instance, including one that restarted since the dial.
+	if mode == models.VirtualAgentModeConference {
+		callbackQuery := url.Values{
+			"reservationSid": {payload.ReservationSID},
+			"taskSid":        {payload.TaskSID},
+		}
+
+		participantParams.SetStatusCallback(
+			c.App.Config.Twilio.WebhookBaseUrl + "/twilio/conference/participant-status?" + callbackQuery.Encode(),
+		)
+		participantParams.SetStatusCallbackMethod("POST")
+		participantParams.SetStatusCallbackEvent([]string{"answered", "completed"})
 	}
 
-	logger.Info().
-		Str("conferenceSid", conferenceSid).
-		Any("participant", participant).
-		Msg("virtual agent connected to the call")
+	// participant, err := c.App.Twilio.AddConferenceParticipant(conferenceSid, participantParams)
+	// if err != nil {
+	// 	logger.Err(err).Str("conferenceSid", conferenceSid).Msg("error dialing the virtual agent into the conference")
+	// 	return err
+	// }
+
+	// connected = true
+
+	// logger.Info().
+	// 	Str("conferenceSid", conferenceSid).
+	// 	Any("participant", participant).
+	// 	Msg("virtual agent connected to the call")
+
+	// On a conference-in the task is the agent's own live task - Flex reserves against it
+	// rather than creating a new one - and Flex is still writing transfer state to it.
+	// UpdateTaskAttributes reads, merges and writes back with no ETag, so recording here
+	// risks dropping one of those writes. The assistant's leg already carries the mode and
+	// the task sid as SIP headers, so there is nothing to gain by taking that risk.
+	if mode == models.VirtualAgentModeConference {
+		logger.Debug().Msg("not writing to the agent's task; the assistant's leg carries what it needs")
+		return nil
+	}
 
 	// Record the assistant's leg on the task so it can be found by call sid later, the way
 	// the inbound flow finds it.
-	updates := map[string]any{"virtual_agent_mode": mode}
-	if participant.CallSid != nil {
-		updates["worker_call_sid"] = *participant.CallSid
-	}
+	// updates := map[string]any{"virtual_agent_mode": mode}
+	// if participant.CallSid != nil {
+	// 	updates["worker_call_sid"] = *participant.CallSid
+	// }
 
-	if err := c.App.Twilio.UpdateTaskAttributes(payload.TaskSID, updates); err != nil {
-		// The assistant is already on the call and carries the task sid on its SIP leg, so
-		// this is worth knowing about but not worth failing the reservation over.
-		logger.Warn().Err(err).Msg("error recording the virtual agent leg on the task")
-	}
+	// if err := c.App.Twilio.UpdateTaskAttributes(payload.TaskSID, updates); err != nil {
+	// 	// The assistant is already on the call and carries the task sid on its SIP leg, so
+	// 	// this is worth knowing about but not worth failing the reservation over.
+	// 	logger.Warn().Err(err).Msg("error recording the virtual agent leg on the task")
+	// }
 
 	return nil
 }

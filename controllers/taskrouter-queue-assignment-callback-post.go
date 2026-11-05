@@ -32,6 +32,40 @@ func (c TaskRouterQueueAssignmentCallbackController) ServeHTTP(w http.ResponseWr
 		Str("reservationSid", r.PostForm.Get("ReservationSid")).
 		Logger()
 
+	worker, err := models.ParseWorkerContactAttributes(r.PostForm.Get("WorkerAttributes"))
+	if err != nil {
+		logger.Error().Err(err).Msg("error parsing task attributes on assignment callback")
+	}
+
+	if !worker.IsVirtualAgent {
+		writeJSONResponse(w, http.StatusAccepted, nil)
+		return
+	}
+
+	if worker.IsVirtualAgent {
+		startConferenceOnEnter := true
+		endConferenceOnExit := false
+		endConferenceOnCustomerExit := true
+
+		response := models.TaskQueueCallbackResponse{
+			Instruction:            "conference",
+			PostWorkActivitySid:    assignmentPostWorkActivitySid,
+			From:                   assignmentCallerId,
+			StartConferenceOnEnter: &startConferenceOnEnter,
+			// The assistant is the worker on this leg. Leaving the conference open when it
+			// exits is what lets it brief a human agent and then drop off mid-call.
+			EndConferenceOnExit:         &endConferenceOnExit,
+			EndConferenceOnCustomerExit: &endConferenceOnCustomerExit,
+			Beep:                        "false",
+			// ConferenceStatusCallback:       c.App.Config.Twilio.WebhookBaseUrl + "/twilio/conference/event",
+			// ConferenceStatusCallbackMethod: "POST",
+			// ConferenceStatusCallbackEvent:  "start,end,join,leave",
+		}
+		writeJSONResponse(w, http.StatusOK, response)
+
+		return
+	}
+
 	transfer, err := models.ParseWarmTransferTaskAttributes(r.PostForm.Get("TaskAttributes"))
 	if err != nil {
 		logger.Error().Err(err).Msg("error parsing task attributes on assignment callback")
@@ -46,6 +80,21 @@ func (c TaskRouterQueueAssignmentCallbackController) ServeHTTP(w http.ResponseWr
 			Msg("accepting warm transfer reservation")
 
 		go c.joinWorkerToConference(transfer, r.PostForm.Get("WorkerSid"), r.PostForm.Get("WorkerAttributes"), logger)
+
+		writeJSONResponse(w, http.StatusOK, &models.TaskQueueCallbackResponse{Instruction: "accept"})
+		return
+	}
+
+	// A reservation offered to the virtual agent on someone else's task is a hand-off to
+	// the assistant, and belongs to the event stream handler, which dials the assistant in
+	// with the SIP headers that tell it what kind of call it is joining. Answering with a
+	// conference instruction here would dial it in without them, so it would come up
+	// thinking it is alone with the caller and greet them mid-conversation.
+	//
+	// Accept the reservation so Task Router stops offering it, and leave the dialling to
+	// the handler that can do it properly.
+	if c.isHandoffToVirtualAgent(r.PostForm.Get("WorkerAttributes"), r.PostForm.Get("TaskAttributes"), logger) {
+		logger.Info().Msg("hand-off to the virtual agent; accepting and leaving the dial to the event stream")
 
 		writeJSONResponse(w, http.StatusOK, &models.TaskQueueCallbackResponse{Instruction: "accept"})
 		return
@@ -71,6 +120,32 @@ func (c TaskRouterQueueAssignmentCallbackController) ServeHTTP(w http.ResponseWr
 	}
 
 	writeJSONResponse(w, http.StatusOK, &response)
+}
+
+// isHandoffToVirtualAgent reports whether this reservation is a transfer of a live call to
+// the assistant, as opposed to the assistant's own inbound call, which this callback does
+// own and answers with a conference instruction.
+func (c TaskRouterQueueAssignmentCallbackController) isHandoffToVirtualAgent(workerAttributes string, taskAttributes string, logger zerolog.Logger) bool {
+	var worker models.WorkerAttributes
+
+	if err := models.DecodeTwilioAttributes([]byte(workerAttributes), &worker); err != nil {
+		logger.Warn().Err(err).Msg("error reading worker attributes on assignment callback")
+		return false
+	}
+
+	if !worker.IsVirtualAgent {
+		return false
+	}
+
+	transfer, err := models.ParseWarmTransferTaskAttributes(taskAttributes)
+	if err != nil {
+		logger.Warn().Err(err).Msg("error reading task attributes on assignment callback")
+		return false
+	}
+
+	// The assistant's own inbound task is this callback's to answer; anything else
+	// reserved against the assistant is a hand-off from somewhere.
+	return !transfer.IsVirtualAgentTask
 }
 
 // joinWorkerToConference dials the reserved worker into the conference the caller is

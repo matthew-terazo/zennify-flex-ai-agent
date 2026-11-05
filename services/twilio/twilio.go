@@ -14,6 +14,8 @@ import (
 
 type TwilioClient interface {
 	AcceptReservaton(reservationSid string, taskSid string, params taskrouter.UpdateTaskReservationParams) (*taskrouter.TaskrouterV1TaskReservation, error)
+	AcceptReservationIfPending(reservationSid string, taskSid string) (*taskrouter.TaskrouterV1TaskReservation, error)
+	CompleteReservation(reservationSid string, taskSid string) (*taskrouter.TaskrouterV1TaskReservation, error)
 	FetchConversation(conversationSid string) (*conversations.ConversationsV1Conversation, error)
 	UpdateConversationWebhook(conversationSid string, params conversations.CreateConversationScopedWebhookParams) (*conversations.ConversationsV1ConversationScopedWebhook, error)
 	CloseConversation(conversationSid string) (*conversations.ConversationsV1Conversation, error)
@@ -59,6 +61,69 @@ func (s twilioClientImpl) AcceptReservaton(reservationSid string, taskSid string
 		taskSid,
 		reservationSid,
 		&params)
+}
+
+// setReservationStatus moves a reservation to a given status.
+func (s twilioClientImpl) setReservationStatus(reservationSid string, taskSid string, status string) (*taskrouter.TaskrouterV1TaskReservation, error) {
+	var params taskrouter.UpdateTaskReservationParams
+
+	params.SetReservationStatus(status)
+
+	return s.client.TaskrouterV1.UpdateTaskReservation(s.workspaceSid, taskSid, reservationSid, &params)
+}
+
+// CompleteReservation finishes a reservation off. The assistant joins a consultation as a
+// conference participant, not as the worker handling the task, so once its leg is up the
+// reservation has served its purpose: completing it hands the worker's capacity back
+// instead of leaving it assigned to a call it is only being consulted on.
+//
+// Task Router does not allow every status to move straight to completed - a reservation
+// still pending has to be accepted first - so that two step path is used as a fallback.
+// Either way the reservation ends up completed.
+func (s twilioClientImpl) CompleteReservation(reservationSid string, taskSid string) (*taskrouter.TaskrouterV1TaskReservation, error) {
+	reservation, err := s.setReservationStatus(reservationSid, taskSid, "completed")
+	if err == nil {
+		return reservation, nil
+	}
+
+	current, fetchErr := s.client.TaskrouterV1.FetchTaskReservation(s.workspaceSid, taskSid, reservationSid)
+	if fetchErr != nil || current.ReservationStatus == nil {
+		return nil, err
+	}
+
+	switch *current.ReservationStatus {
+	case "completed":
+		return current, nil // already finished, by us or by Flex
+	case "pending":
+		if _, acceptErr := s.setReservationStatus(reservationSid, taskSid, "accepted"); acceptErr != nil {
+			return nil, err
+		}
+
+		return s.setReservationStatus(reservationSid, taskSid, "completed")
+	}
+
+	return nil, err
+}
+
+// AcceptReservationIfPending accepts a reservation, treating one that has already been
+// accepted as success rather than an error. Task Router rejects a second accept with
+// "Invalid state transition", but losing that race is not a failure: an assignment
+// callback can accept a reservation before the event stream reaches us, and the event
+// stream can deliver the same reservation twice. What matters is that it ends up accepted.
+func (s twilioClientImpl) AcceptReservationIfPending(reservationSid string, taskSid string) (*taskrouter.TaskrouterV1TaskReservation, error) {
+	var params taskrouter.UpdateTaskReservationParams
+
+	reservation, err := s.AcceptReservaton(reservationSid, taskSid, params)
+	if err == nil {
+		return reservation, nil
+	}
+
+	current, fetchErr := s.client.TaskrouterV1.FetchTaskReservation(s.workspaceSid, taskSid, reservationSid)
+	if fetchErr != nil || current.ReservationStatus == nil || *current.ReservationStatus != "accepted" {
+		return nil, err
+	}
+
+	return current, nil
 }
 
 func (s twilioClientImpl) FetchConversation(conversationSid string) (*conversations.ConversationsV1Conversation, error) {

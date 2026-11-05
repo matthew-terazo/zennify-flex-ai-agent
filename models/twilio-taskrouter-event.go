@@ -168,6 +168,9 @@ func (m TwilioTaskRouterPayload) TransferAttributes() (TransferredTaskAttributes
 		return attributes, err
 	}
 
+	attributes.eventTransferMode = m.TransferMode
+	attributes.eventTransferSid = m.TaskTransferSID
+
 	return attributes, nil
 }
 

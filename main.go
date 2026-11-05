@@ -15,6 +15,7 @@ import (
 	"zennify/zenn-ai-assistant/models"
 	ai "zennify/zenn-ai-assistant/services/artificial-intelligence"
 	promptconfiguration "zennify/zenn-ai-assistant/services/prompt-configuration"
+	"zennify/zenn-ai-assistant/services/reservation"
 	comms_twilio "zennify/zenn-ai-assistant/services/twilio"
 	warmtransfer "zennify/zenn-ai-assistant/services/warm-transfer"
 )
@@ -49,6 +50,7 @@ func main() {
 		DB:                  database,
 		PromptConfigService: promptConfigService,
 		WarmTransfers:       warmtransfer.NewBroker(),
+		Reservations:        reservation.NewGuard(),
 	}
 
 	controllers.RegisterRoutes(app)

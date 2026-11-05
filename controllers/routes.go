@@ -38,6 +38,13 @@ func RegisterRoutes(app models.App) {
 			twilioAuth,
 			middleware.Logging))
 
+	// Status of a participant leg this service dialled; accepts a warm transfer's
+	// reservation once the virtual agent has answered
+	app.Mux.Handle("POST /twilio/conference/participant-status",
+		middleware.Chain(ConferenceParticipantStatusController{App: app},
+			twilioAuth,
+			middleware.Logging))
+
 	app.Mux.Handle("POST /openai/events/realtime-call-incoming",
 		middleware.Chain(OpenAIEventController{App: app},
 			middleware.Logging))

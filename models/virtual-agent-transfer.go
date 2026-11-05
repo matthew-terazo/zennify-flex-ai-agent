@@ -43,6 +43,12 @@ type TransferredTaskAttributes struct {
 	VirtualAgentMode   string                   `json:"virtual_agent_mode"`
 	TransferMeta       *FlexTransferMeta        `json:"transferMeta"`
 	Conference         TaskConferenceAttributes `json:"conference"`
+
+	// Taken from the reservation event rather than the task. Flex states the transfer on
+	// the event payload (transfer_mode, task_transfer_sid) and does not necessarily write
+	// a transferMeta block onto the task, so the event is the reliable source.
+	eventTransferMode string
+	eventTransferSid  string
 }
 
 // IsTransferToVirtualAgent distinguishes a hand-off to the assistant from the inbound call
@@ -50,12 +56,25 @@ type TransferredTaskAttributes struct {
 // queue assignment callback, which dials the assistant in itself; accepting that one here
 // as well would connect the assistant to the same call twice.
 func (a TransferredTaskAttributes) IsTransferToVirtualAgent() bool {
-	return a.TransferMeta != nil || !a.IsVirtualAgentTask
+	return a.eventTransferSid != "" || a.TransferMeta != nil || !a.IsVirtualAgentTask
 }
 
 // ConnectionMode reports how the assistant should behave on this task. A Flex WARM
 // transfer is a conference-in: the transferring agent stays on the call.
 func (a TransferredTaskAttributes) ConnectionMode() string {
+	// What Flex actually sends, and the freshest source. It outranks the mode recorded on
+	// the task because Flex reserves against an existing task on a transfer: an agent who
+	// consults the assistant and later cold transfers the same task would otherwise be
+	// read back as a consultation.
+	if a.eventTransferMode != "" {
+		if strings.EqualFold(a.eventTransferMode, "WARM") {
+			return VirtualAgentModeConference
+		}
+
+		return VirtualAgentModeCold
+	}
+
+	// Recorded on the task when the assistant was connected, for reads that have no event.
 	if a.VirtualAgentMode != "" {
 		return a.VirtualAgentMode
 	}

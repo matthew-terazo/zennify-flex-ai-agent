@@ -29,6 +29,8 @@ type TaskQueueCallbackResponse struct {
 	To                  string `json:"to,omitempty"`
 	Timeout             int    `json:"timeout,omitempty"`
 
+	Accept *bool `json:"accept,omitempty"`
+
 	// Pointers so an explicit false is sent rather than omitted. EndConferenceOnExit
 	// false is load-bearing: it is what lets the assistant hang up its own leg without
 	// tearing down the conference the caller and agent are still on.

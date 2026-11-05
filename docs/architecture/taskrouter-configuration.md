@@ -10,7 +10,7 @@ Flows: [direct answer](direct-answer-call.d2) · [warm transfer](warm-transfer-c
 ## At a glance
 
 - 2 task queues — one holding the virtual agent, one named exactly `Everyone`
-- 3 workflows — inbound voice, chat, and Flex's own; **only the voice one may point at the
+- 3 workflows — inbound voice, chat, and Flex's own; **chat must not point at the
   assignment callback**
 - Workspace event callback enabled for `reservation.created`
 - `contact_uri` on every worker that can be dialled, `isVirtualAgent` on the assistant
@@ -84,23 +84,40 @@ inbound task's own `WorkflowSid` and sets `routing_target` to the `Everyone` que
 Routing target bypasses filter evaluation, so no filter matching `target_queue` is required
 on the inbound workflow.
 
-### The constraint that matters most
+### What the assignment callback answers
 
-`controllers/taskrouter-queue-assignment-callback-post.go` has exactly two branches:
+`controllers/taskrouter-queue-assignment-callback-post.go` has three branches, in order:
 
-- task attributes say `is_warm_transfer` and name a conference, so answer `accept` and dial
-  the worker into the conference the caller is already on
-- anything else, so answer with a `conference` instruction
+1. task attributes say `is_warm_transfer` and name a conference — answer `accept` and dial
+   the worker into the conference the caller is already on
+2. the reserved worker is a virtual agent and the task is **not** flagged
+   `isVirtualAgentTask` — a hand-off of a live call to the assistant. Answer `accept` and
+   nothing else; the event stream handler dials the assistant in with the SIP headers that
+   tell it what kind of call it is joining
+3. anything else — answer with a `conference` instruction
 
-That second branch is unconditional. Any task reaching this endpoint that is not one of our
-own warm transfers is told to start a conference named after its own task sid:
+Branch 2 exists because Flex transfers reach this callback whenever it is configured on the
+Flex workflow, and they used to fall through to branch 3. That dialled the assistant in
+without the mode headers, so it came up believing it was alone with the caller and greeted
+them in the middle of a consultation. It also accepted the reservation first, which made the
+event stream handler's own accept fail with `20001 Invalid state transition`.
 
-- a **Flex transfer** would get a brand new empty conference instead of joining the
-  customer's, and the transfer breaks with no obvious error
-- a **chat task** would get a voice instruction that means nothing for chat
+**Chat still must not reach this callback.** Branch 3 is still unconditional for anything
+that is not one of the two cases above, and a chat task given a voice instruction means
+nothing. Chat and voice cannot share a workflow.
 
-So exactly one workflow may point at the assignment callback, and chat and voice cannot
-share a workflow.
+### Duplicate delivery is expected
+
+With the callback configured on a workflow that also carries Flex transfers, one reservation
+reaches this service twice: once on the callback, once on the event stream. Connecting the
+assistant dials a real call leg, so it is claimed once through
+`services/reservation.Guard` and later arrivals stand down. Accepting is tolerant of having
+already happened (`AcceptReservationIfPending`), and the event webhook answers 2xx even when
+a reservation fails, because redelivering half-finished work is worse than letting the
+reservation time out where someone can see it.
+
+The guard is per process. Running more than one instance behind a load balancer would let
+two of them claim the same reservation; that needs shared state before scaling out.
 
 ## Workspace settings
 

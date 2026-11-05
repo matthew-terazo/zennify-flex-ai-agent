@@ -70,7 +70,8 @@ func ParseWarmTransferTaskAttributes(raw string) (WarmTransferTaskAttributes, er
 // WorkerContactAttributes is the slice of a worker's attributes needed to dial them into
 // a conference.
 type WorkerContactAttributes struct {
-	ContactUri string `json:"contact_uri"`
+	ContactUri     string `json:"contact_uri"`
+	IsVirtualAgent bool   `json:"isVirtualAgent"`
 }
 
 func ParseWorkerContactAttributes(raw string) (WorkerContactAttributes, error) {
