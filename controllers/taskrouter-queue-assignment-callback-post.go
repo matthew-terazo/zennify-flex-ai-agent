@@ -37,15 +37,10 @@ func (c TaskRouterQueueAssignmentCallbackController) ServeHTTP(w http.ResponseWr
 		logger.Error().Err(err).Msg("error parsing task attributes on assignment callback")
 	}
 
-	if !worker.IsVirtualAgent {
-		writeJSONResponse(w, http.StatusAccepted, nil)
-		return
-	}
-
 	if worker.IsVirtualAgent {
 		startConferenceOnEnter := true
 		endConferenceOnExit := false
-		endConferenceOnCustomerExit := true
+		endConferenceOnCustomerExit := false
 
 		response := models.TaskQueueCallbackResponse{
 			Instruction:            "conference",
@@ -71,6 +66,11 @@ func (c TaskRouterQueueAssignmentCallbackController) ServeHTTP(w http.ResponseWr
 		logger.Error().Err(err).Msg("error parsing task attributes on assignment callback")
 	}
 
+	if !worker.IsVirtualAgent && !transfer.IsWarmTransfer {
+		writeJSONResponse(w, http.StatusNoContent, nil)
+		return
+	}
+
 	// The caller on a transfer task is already sitting in a conference with the
 	// assistant. Accept the reservation and dial this worker into that conference rather
 	// than bridging a second call, so all three legs are up at once.
@@ -78,10 +78,28 @@ func (c TaskRouterQueueAssignmentCallbackController) ServeHTTP(w http.ResponseWr
 		logger.Info().
 			Str("conferenceName", transfer.ConferenceName).
 			Msg("accepting warm transfer reservation")
+		startConferenceOnEnter := true
+		endConferenceOnExit := false
+		endConferenceOnCustomerExit := false
 
-		go c.joinWorkerToConference(transfer, r.PostForm.Get("WorkerSid"), r.PostForm.Get("WorkerAttributes"), logger)
+		response := models.TaskQueueCallbackResponse{
+			Instruction:            "conference",
+			PostWorkActivitySid:    assignmentPostWorkActivitySid,
+			From:                   assignmentCallerId,
+			StartConferenceOnEnter: &startConferenceOnEnter,
+			// The assistant is the worker on this leg. Leaving the conference open when it
+			// exits is what lets it brief a human agent and then drop off mid-call.
+			EndConferenceOnExit:         &endConferenceOnExit,
+			EndConferenceOnCustomerExit: &endConferenceOnCustomerExit,
+			Beep:                        "false",
+			// ConferenceStatusCallback:       c.App.Config.Twilio.WebhookBaseUrl + "/twilio/conference/event",
+			// ConferenceStatusCallbackMethod: "POST",
+			// ConferenceStatusCallbackEvent:  "start,end,join,leave",
+		}
+		writeJSONResponse(w, http.StatusOK, response)
+		// go c.joinWorkerToConference(transfer, r.PostForm.Get("WorkerSid"), r.PostForm.Get("WorkerAttributes"), logger)
 
-		writeJSONResponse(w, http.StatusOK, &models.TaskQueueCallbackResponse{Instruction: "accept"})
+		// writeJSONResponse(w, http.StatusOK, &models.TaskQueueCallbackResponse{Instruction: "accept"})
 		return
 	}
 
@@ -102,7 +120,7 @@ func (c TaskRouterQueueAssignmentCallbackController) ServeHTTP(w http.ResponseWr
 
 	startConferenceOnEnter := true
 	endConferenceOnExit := false
-	endConferenceOnCustomerExit := true
+	endConferenceOnCustomerExit := false
 
 	response := models.TaskQueueCallbackResponse{
 		Instruction:            "conference",
